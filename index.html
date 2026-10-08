@@ -107,6 +107,9 @@ h1,h2,h3{font-family:var(--font-display);margin:0;text-wrap:balance}
 .toast span{min-width:0;overflow-wrap:anywhere}
 .toast button{height:34px;padding:0 14px;border-radius:8px;font-weight:600;background:var(--bg);color:var(--fg);flex:none}
 
+.rep{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;color:var(--muted)}
+.rep svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+
 /* hero calendar */
 .hero{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:16px;margin-bottom:16px}
 .hero-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-bottom:12px}
@@ -153,6 +156,7 @@ h1,h2,h3{font-family:var(--font-display);margin:0;text-wrap:balance}
 textarea.field{height:auto;padding:10px 12px;resize:vertical;width:100%}
 .quick select.field{flex:0 1 180px}
 .quick input[type=date]{flex:0 1 150px}
+.quick #qa-repeat{flex:0 1 150px}
 .btn{height:40px;padding:0 16px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap}
 .btn:hover{background:var(--surface-2)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
@@ -338,7 +342,7 @@ textarea.field{height:auto;padding:10px 12px;resize:vertical;width:100%}
   .prog{display:none}
   .top{margin-bottom:12px}
   .brand h1{font-size:24px}
-  .quick select.field,.quick input[type=date]{flex:1 1 140px}
+  .quick select.field,.quick input[type=date],.quick #qa-repeat{flex:1 1 140px}
   .quick .btn.primary{flex:1 1 100%}
 }
 </style>
@@ -365,6 +369,7 @@ textarea.field{height:auto;padding:10px 12px;resize:vertical;width:100%}
         <input class="field" type="text" id="qa-title" placeholder="เพิ่มงานใหม่ แล้วกด Enter  เช่น ส่งงานตัดต่อให้ลูกค้า" aria-label="ชื่องานใหม่">
         <select class="field" id="qa-project" aria-label="โปรเจกต์"></select>
         <input class="field" type="date" id="qa-due" aria-label="กำหนดส่ง">
+        <select class="field" id="qa-repeat" aria-label="ทำซ้ำ"><option value="">ไม่ซ้ำ</option><option value="weekly">ซ้ำรายสัปดาห์</option><option value="monthly">ซ้ำรายเดือน</option></select>
         <button type="button" class="tog" id="qa-urgent" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M5 21V4m0 0h12l-2 4 2 4H5"/></svg>ด่วน</button>
         <button type="submit" class="btn primary"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่มงาน</button>
       </form>
@@ -409,6 +414,7 @@ const NOPROJ = {id:'', name:'ทั่วไป', color:'#6B7A8C'};
 const DAYS = ['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
 
 const ICON = {
+  repeat:'M17 2l4 4-4 4M3 11V9a3 3 0 013-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 01-3 3H3',
   trash:'M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13M10 11v6M14 11v6', flag:'M5 21V4m0 0h12l-2 4 2 4H5', plus:'M12 5v14M5 12h14', pencil:'M4 20h4L19 9l-4-4L4 16z',
   cal:'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4', x:'M6 6l12 12M18 6L6 18',
   prev:'M15 6l-6 6 6 6', next:'M9 6l6 6-6 6', check:'M5 12.5l4.5 4.5L19 7.5'
@@ -468,7 +474,8 @@ function normalize(d){
   s.tasks = (d.tasks||[]).map(t => ({
     id:String(t.id), title:String(t.title||''), projectId:t.projectId||'', status:STATUS[t.status]?t.status:'todo',
     urgent:!!t.urgent, people:Array.isArray(t.people)?t.people.slice():[], due:t.due||'', note:t.note||'',
-    createdAt:t.createdAt||0, doneAt:t.doneAt||null}));
+    createdAt:t.createdAt||0, doneAt:t.doneAt||null,
+    repeat:(t.repeat==='weekly'||t.repeat==='monthly') ? t.repeat : '', rday:Number(t.rday)||0, nextId:t.nextId||''}));
   s.people = (d.people||[]).slice();
   s.demo = !!d.demo;
   return s;
@@ -525,6 +532,8 @@ function avatars(list){
   const more = list.length>3 ? `<span class="av more" title="${esc(list.slice(3).join(', '))}">+${list.length-3}</span>` : '';
   return `<span class="avs">${shown}${more}</span>`;
 }
+const REP = {weekly:'รายสัปดาห์', monthly:'รายเดือน'};
+const repChip = t => t.repeat ? `<span class="rep" title="ทำซ้ำ${REP[t.repeat]}">${icon('repeat')}${REP[t.repeat]}</span>` : '';
 function dueChip(t){
   if (!t.due) return '';
   const over = t.status!=='done' && t.due < todayStr(), today = t.status!=='done' && t.due === todayStr();
@@ -541,14 +550,14 @@ function card(t){
   const done = t.status==='done';
   return `<article class="card${done?' is-done':''}" draggable="true" data-id="${t.id}" data-action="open">
     <div class="card-row">${tick(t)}<button class="ttl" data-action="open">${esc(t.title)}</button>${flagBtn(t)}</div>
-    <div class="meta">${projChip(projOf(t))}${dueChip(t)}${pill(t)}${avatars(t.people)}${actBtns(t)}</div>
+    <div class="meta">${projChip(projOf(t))}${dueChip(t)}${repChip(t)}${pill(t)}${avatars(t.people)}${actBtns(t)}</div>
   </article>`;
 }
 function row(t){
   const done = t.status==='done';
   return `<div class="row${done?' is-done':''}" data-id="${t.id}" data-action="open">
     ${tick(t)}<button class="ttl" data-action="open">${esc(t.title)}</button>
-    <div class="tail">${dueChip(t)}${avatars(t.people)}${pill(t)}${flagBtn(t)}${actBtns(t)}</div>
+    <div class="tail">${dueChip(t)}${repChip(t)}${avatars(t.people)}${pill(t)}${flagBtn(t)}${actBtns(t)}</div>
   </div>`;
 }
 function board(list){
@@ -758,6 +767,7 @@ function taskSheet(t){
         <button type="button" class="mini" data-action="sh-date" data-val="">ล้างวันที่</button>
       </div>
       <fieldset class="fld"><legend>สถานะ</legend><div class="seg" id="sh-status"></div></fieldset>
+      <fieldset class="fld"><legend>ทำซ้ำ</legend><div class="seg" id="sh-repeat"></div><p class="muted-note" id="sh-repnote" style="margin:2px 0 0"></p></fieldset>
       <div class="fld"><span>ความเร่งด่วน</span><button type="button" class="flag big" id="sh-urgent" data-action="sh-urgent" aria-pressed="false">${icon('flag')}<span>ด่วน</span></button></div>
       <div class="fld"><span>ผู้เกี่ยวข้อง</span><div class="chips-row" id="sh-people"></div>
         <div class="add-person"><input class="field" id="sh-person" type="text" placeholder="พิมพ์ชื่อคนใหม่ แล้วกด Enter"><button type="button" class="btn" data-action="add-person">เพิ่ม</button></div></div>
@@ -769,6 +779,8 @@ function taskSheet(t){
 function refreshTask(){
   const t = byId(ui.sheet.id); if (!t) return;
   $('#sh-status').innerHTML = Object.keys(STATUS).map(s => `<button type="button" data-action="sh-status" data-val="${s}" aria-pressed="${t.status===s}">${ring(s)}${STATUS[s]}</button>`).join('');
+  $('#sh-repeat').innerHTML = [['','ไม่ซ้ำ'],['weekly','ทุกสัปดาห์'],['monthly','ทุกเดือน']].map(([v,l]) => `<button type="button" data-action="sh-repeat" data-val="${v}" aria-pressed="${(t.repeat||'')===v}">${l}</button>`).join('');
+  $('#sh-repnote').textContent = t.repeat ? `เมื่อติ๊กว่าเสร็จ แอปจะสร้างงานรอบถัดไปให้เอง (${t.repeat==='weekly' ? 'อีก 7 วัน' : 'วันที่ ' + (t.rday || (t.due ? parse(t.due).getDate() : '-')) + ' ของเดือนหน้า'})` : '';
   $('#sh-urgent').setAttribute('aria-pressed', String(!!t.urgent));
   const names = [...new Set([...state.people, ...t.people])];
   $('#sh-people').innerHTML = names.length ? names.map(n => `<button type="button" class="mini" data-action="sh-person" data-val="${esc(n)}" aria-pressed="${t.people.includes(n)}">${esc(n)}</button>`).join('') : `<span class="muted-note" style="margin:0">ยังไม่มีรายชื่อ</span>`;
@@ -800,9 +812,9 @@ function refreshProject(){
 
 /* ---------- actions ---------- */
 let removed = [], toastTimer = null;
-function showToast(msg){
+function showToast(msg, undo = true){
   const el = $('#toast'); el.hidden = false;
-  el.innerHTML = `<span>${esc(msg)}</span><button data-action="undo">เลิกทำ</button>`;
+  el.innerHTML = `<span>${esc(msg)}</span>` + (undo ? `<button data-action="undo">เลิกทำ</button>` : '');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; removed = []; }, 8000);
 }
 function removeTasks(ids){
@@ -817,17 +829,49 @@ function restoreRemoved(){
   removed.forEach(({t, i}) => state.tasks.splice(Math.min(i, state.tasks.length), 0, t));
   removed = []; $('#toast').hidden = true; clearTimeout(toastTimer); commit();
 }
+function addMonth(d, day){
+  const x = parse(d), y = x.getFullYear(), m = x.getMonth() + 1, last = new Date(y, m + 1, 0).getDate();
+  return ymd(new Date(y, m, Math.min(day, last)));
+}
+const stepDue = (d, t) => t.repeat==='monthly' ? addMonth(d, t.rday || parse(d).getDate()) : addDays(d, 7);
+function nextDue(t){
+  const today = todayStr(); let n = stepDue(t.due, t), guard = 0;
+  while (n < today && guard++ < 600) n = stepDue(n, t);
+  return n;
+}
+function spawnNext(t){
+  if (!t.repeat || !t.due) return;
+  const nd = nextDue(t);
+  const copy = Object.assign({}, t, {id:'t'+uid(), status:'todo', due:nd, doneAt:null, createdAt:Date.now(), nextId:'', people:t.people.slice()});
+  state.tasks.push(copy); t.nextId = copy.id;
+  showToast(`สร้างงานรอบถัดไปวันที่ ${shortDate(nd)} แล้ว`, false);
+}
+function unspawn(t){
+  if (!t.nextId) return;
+  const n = byId(t.nextId);
+  if (n && n.status==='todo') state.tasks = state.tasks.filter(x => x.id!==n.id);
+  t.nextId = '';
+}
 function sampleState(){
   const d = n => addDays(todayStr(), n), now = Date.now();
   const P = [['p1','งานบ้าน','#1FA38A'],['p2','งานที่ทำงาน','#2F8FD8'],['p3','นัดหมาย','#D6447F']];
-  const T = [['p2','ส่งรายงานประจำเดือน','doing',1,['เรา'],d(1)],['p2','ประชุมทีมเช้าวันจันทร์','todo',0,[],d(3)],
-    ['p1','ซื้อของเข้าบ้านสุดสัปดาห์','todo',0,['แฟน'],d(2)],['p1','จ่ายค่าน้ำค่าไฟ','todo',1,['เรา'],d(0)],
+  const T = [['p2','ส่งรายงานประจำเดือน','doing',1,['เรา'],d(1)],['p2','ประชุมทีมเช้าวันจันทร์','todo',0,[],d(3),'weekly'],
+    ['p1','ซื้อของเข้าบ้านสุดสัปดาห์','todo',0,['แฟน'],d(2)],['p1','จ่ายค่าน้ำค่าไฟ','todo',1,['เรา'],d(0),'monthly'],
     ['p3','นัดหมอฟัน','todo',0,['เรา','แฟน'],d(5)],['p3','ดูหนังด้วยกัน','todo',0,['เรา','แฟน'],d(6)],
     ['p1','ซักผ้าห่ม','done',0,['แฟน'],d(-1)],['p2','เตรียมสไลด์พรีเซนต์','todo',0,[],'']];
   return {demo:true, people:['เรา','แฟน'], projects:P.map(([id,name,color]) => ({id,name,color})),
-    tasks:T.map(([p,title,status,u,people,due],i) => ({id:'s'+i, title, projectId:p, status, urgent:!!u, people, due, note:'', createdAt:now+i, doneAt:status==='done'?now:null}))};
+    tasks:T.map(([p,title,status,u,people,due,repeat],i) => ({id:'s'+i, title, projectId:p, status, urgent:!!u, people, due, note:'', createdAt:now+i, doneAt:status==='done'?now:null, repeat:repeat||'', rday:repeat==='monthly'?parse(due).getDate():0, nextId:''}))};
 }
-function setStatus(t, s){ t.status = s; t.doneAt = s==='done' ? Date.now() : null; }
+function setStatus(t, s){
+  const was = t.status;
+  t.status = s; t.doneAt = s==='done' ? Date.now() : null;
+  if (s==='done' && was!=='done') spawnNext(t);
+  else if (s!=='done' && was==='done') unspawn(t);
+}
+function afterDueChange(t){
+  if (!t.due) t.repeat = '';
+  else if (t.repeat==='monthly') t.rday = parse(t.due).getDate();
+}
 function addPerson(){
   const inp = $('#sh-person'), name = inp.value.trim(), t = byId(ui.sheet.id);
   if (!name || !t) return;
@@ -867,7 +911,8 @@ document.addEventListener('click', e => {
     case 'load-sample': state = sampleState(); commit(); break;
     case 'clear-demo': state = {projects:[], tasks:[], people:[], demo:false}; ui.project='all'; ui.person='all'; commit(); break;
     case 'close-sheet': closeSheet(); break;
-    case 'sh-date': { const v = el.dataset.val; const t2 = byId(sh.id); t2.due = v==='' ? '' : addDays(todayStr(), Number(v)); $('#sh-due').value = t2.due; commit(); break; }
+    case 'sh-date': { const v = el.dataset.val; const t2 = byId(sh.id); t2.due = v==='' ? '' : addDays(todayStr(), Number(v)); afterDueChange(t2); $('#sh-due').value = t2.due; refreshTask(); commit(); break; }
+    case 'sh-repeat': { const t2 = byId(sh.id); t2.repeat = el.dataset.val; if (t2.repeat && !t2.due){ t2.due = todayStr(); $('#sh-due').value = t2.due; } if (t2.repeat==='monthly') t2.rday = parse(t2.due).getDate(); refreshTask(); commit(); break; }
     case 'sh-status': { const t2 = byId(sh.id); setStatus(t2, el.dataset.val); refreshTask(); commit(); break; }
     case 'sh-urgent': { const t2 = byId(sh.id); t2.urgent = !t2.urgent; refreshTask(); commit(); break; }
     case 'sh-person': { const t2 = byId(sh.id), n = el.dataset.val; t2.people = t2.people.includes(n) ? t2.people.filter(x => x!==n) : [...t2.people, n]; refreshTask(); commit(); break; }
@@ -897,7 +942,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const id = e.target.id, sh = ui.sheet; if (!sh) return;
   if (id==='sh-project'){ byId(sh.id).projectId = e.target.value; commit(); }
-  else if (id==='sh-due'){ byId(sh.id).due = e.target.value; commit(); }
+  else if (id==='sh-due'){ const t2 = byId(sh.id); t2.due = e.target.value; afterDueChange(t2); refreshTask(); commit(); }
 });
 document.addEventListener('keydown', e => {
   if (e.key==='Escape' && ui.sheet) closeSheet();
@@ -953,8 +998,10 @@ $('#quick').addEventListener('submit', e => {
   e.preventDefault();
   const inp = $('#qa-title'), title = inp.value.trim();
   if (!title){ inp.focus(); return; }
-  state.tasks.push({id:'t'+uid(), title, projectId:$('#qa-project').value, status:'todo', urgent:qaUrgent, people:[], due:$('#qa-due').value, note:'', createdAt:Date.now(), doneAt:null});
-  inp.value = ''; $('#qa-due').value = ''; qaUrgent = false; $('#qa-urgent').setAttribute('aria-pressed','false');
+  const rpt = $('#qa-repeat').value, due = $('#qa-due').value || (rpt ? todayStr() : '');
+  state.tasks.push({id:'t'+uid(), title, projectId:$('#qa-project').value, status:'todo', urgent:qaUrgent, people:[], due, note:'', createdAt:Date.now(), doneAt:null,
+    repeat:rpt, rday:rpt==='monthly' ? parse(due).getDate() : 0, nextId:''});
+  inp.value = ''; $('#qa-due').value = ''; $('#qa-repeat').value = ''; qaUrgent = false; $('#qa-urgent').setAttribute('aria-pressed','false');
   commit(); inp.focus();
 });
 
