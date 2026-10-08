@@ -297,6 +297,7 @@ textarea.field{height:auto;padding:10px 12px;resize:vertical;width:100%}
 
 @media (max-width:860px){input,select,textarea,.field{font-size:16px}}
 /* responsive */
+.bk-note{margin:6px 2px 0;font-size:12.5px;color:var(--muted)}
 @media (max-width:1100px){
   .week{grid-template-columns:repeat(2,minmax(0,1fr))}
   .day .avs{display:inline-flex}
@@ -454,6 +455,7 @@ async function flush(){
       dirty = false;
       const data = JSON.parse(JSON.stringify(state));
       localStorage.setItem('wp-data', JSON.stringify(data));
+      idbPut(data).catch(() => {});
     } while (dirty);
     setSync('saved');
   }catch(e){ setSync('error'); }
@@ -471,9 +473,31 @@ function normalize(d){
   s.demo = !!d.demo;
   return s;
 }
-function initStore(){
-  try{ state = normalize(JSON.parse(localStorage.getItem('wp-data')||'null')); }catch(e){}
+const DAY = 864e5;
+const lsGet = k => { try{ return localStorage.getItem(k); }catch(e){ return null; } };
+const lsSet = (k, v) => { try{ localStorage.setItem(k, String(v)); }catch(e){} };
+function idbOpen(){ return new Promise((res, rej) => { const r = indexedDB.open('wp', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function idbPut(v){ const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, 'state'); tx.oncomplete = () => { db.close(); res(); }; tx.onerror = () => rej(tx.error); }); }
+async function idbGet(){ const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction('kv'); const q = tx.objectStore('kv').get('state'); q.onsuccess = () => { db.close(); res(q.result); }; q.onerror = () => rej(q.error); }); }
+function backupDue(){
+  if (!state.tasks.length || Date.now() < Number(lsGet('wp-snooze') || 0)) return false;
+  const last = Number(lsGet('wp-lastbackup') || 0), first = Number(lsGet('wp-first') || Date.now());
+  return last ? Date.now() - last > 14*DAY : Date.now() - first > 3*DAY;
+}
+function backupNote(){
+  const last = Number(lsGet('wp-lastbackup') || 0);
+  return last ? `สำรองล่าสุด ${new Date(last).toLocaleDateString('th-TH', {day:'numeric', month:'short'})}` : 'ยังไม่เคยสำรองข้อมูล';
+}
+async function initStore(){
+  if (!lsGet('wp-first')) lsSet('wp-first', Date.now());
+  const raw = lsGet('wp-data');
+  let restored = false;
+  if (raw){ try{ state = normalize(JSON.parse(raw)); }catch(e){} }
+  else {
+    try{ const copy = await idbGet(); if (copy && Array.isArray(copy.tasks) && copy.tasks.length){ state = normalize(copy); lsSet('wp-data', JSON.stringify(state)); restored = true; } }catch(e){}
+  }
   loaded = true; render(); setSync('saved');
+  if (restored){ const el = $('#sync'); el.textContent = 'กู้ข้อมูลคืนจากสำเนาสำรองในเครื่องแล้ว'; }
   try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){}
 }
 const commit = () => { render(); scheduleSave(); };
@@ -604,6 +628,10 @@ function renderBanner(){
       <button class="btn sm primary" data-action="import-ok">นำเข้า</button><button class="btn sm" data-action="import-no">ยกเลิก</button></div>`;
     return;
   }
+  if (!state.demo && backupDue()){
+    $('#banner').innerHTML = `<div class="pend"><span>ควรสำรองข้อมูลไว้ในกรณีเครื่องล้างข้อมูล (${esc(backupNote())}) กดแล้วเลือกบันทึกลงไฟล์หรือ iCloud Drive</span><button class="btn sm primary" data-action="backup">สำรองเลย</button><button class="btn sm" data-action="snooze">ไว้ก่อน</button></div>`;
+    return;
+  }
   $('#banner').innerHTML = state.demo ?`<div class="banner"><span>นี่คือข้อมูลตัวอย่างให้ลองใช้ แก้ไขหรือลบได้ทุกอย่าง</span><button class="btn" data-action="clear-demo" style="height:34px">ล้างข้อมูลตัวอย่างทั้งหมด</button></div>` : '';
 }
 function renderBar(){
@@ -641,7 +669,7 @@ function renderSide(){
   h += `<section><div class="side-h"><h2>ผู้เกี่ยวข้อง</h2></div>` + (people.length ? `<ul class="list-reset">` + people.map(([n,c]) =>
     `<li><button class="pe-btn" data-action="f-person" data-id="${esc(n)}" aria-pressed="${ui.person===n}"><span class="av" style="--h:${hueOf(n)};margin:0">${esc(initial(n))}</span><span class="nm">${esc(n)}</span><span class="n">${c}</span></button></li>`).join('') + `</ul>`
     : `<p class="muted-note">ยังไม่มี เพิ่มชื่อได้ในรายละเอียดของแต่ละงาน</p>`) + `</section>`;
-  h += `<section><div class="side-h"><h2>ข้อมูล</h2></div><div class="data-row"><button class="btn sm" data-action="backup">สำรองข้อมูล</button><button class="btn sm" data-action="import-pick">นำเข้า</button></div></section>`;
+  h += `<section><div class="side-h"><h2>ข้อมูล</h2></div><div class="data-row"><button class="btn sm" data-action="backup">สำรองข้อมูล</button><button class="btn sm" data-action="import-pick">นำเข้า</button></div><p class="bk-note">${esc(backupNote())}</p></section>`;
   $('#side').innerHTML = h;
 }
 function renderQuick(){
@@ -826,6 +854,7 @@ document.addEventListener('click', e => {
       const p = {id:'p'+uid(), name:'โปรเจกต์ใหม่', color:PALETTE.find(c => !used.has(c)) || PALETTE[state.projects.length % PALETTE.length]};
       state.projects.push(p); render(); openSheet('project', p.id); break; }
     case 'edit-project': openSheet('project', id); break;
+    case 'snooze': lsSet('wp-snooze', Date.now() + 3*DAY); renderBanner(); break;
     case 'load-sample': state = sampleState(); commit(); break;
     case 'clear-demo': state = {projects:[], tasks:[], people:[], demo:false}; ui.project='all'; ui.person='all'; commit(); break;
     case 'close-sheet': closeSheet(); break;
@@ -868,13 +897,20 @@ document.addEventListener('keydown', e => {
 });
 $('#f-urgent').addEventListener('click', () => { ui.urgentOnly = !ui.urgentOnly; render(); });
 $('#f-done').addEventListener('click', () => { ui.hideDone = !ui.hideDone; render(); });
-function backup(){
+async function backup(){
+  const name = `planner-backup-${todayStr()}.json`, json = JSON.stringify(state, null, 2);
+  const done = () => { lsSet('wp-lastbackup', Date.now()); renderBanner(); renderSide(); };
   try{
-    const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+    const file = new File([json], name, {type:'application/json'});
+    if (navigator.canShare && navigator.canShare({files:[file]})){
+      try{ await navigator.share({files:[file], title:'สำรองตารางงาน'}); done(); return; }
+      catch(e){ if (e && e.name==='AbortError') return; }
+    }
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = `ตารางงาน-สำรอง-${todayStr()}.json`;
+    a.href = URL.createObjectURL(new Blob([json], {type:'application/json'})); a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    done();
   }catch(e){ $('#sync').className = 'sync error'; $('#sync').textContent = 'สำรองข้อมูลไม่สำเร็จ'; }
 }
 $('#import-file').addEventListener('change', e => {
