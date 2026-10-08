@@ -479,10 +479,19 @@ const lsSet = (k, v) => { try{ localStorage.setItem(k, String(v)); }catch(e){} }
 function idbOpen(){ return new Promise((res, rej) => { const r = indexedDB.open('wp', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
 async function idbPut(v){ const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, 'state'); tx.oncomplete = () => { db.close(); res(); }; tx.onerror = () => rej(tx.error); }); }
 async function idbGet(){ const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction('kv'); const q = tx.objectStore('kv').get('state'); q.onsuccess = () => { db.close(); res(q.result); }; q.onerror = () => rej(q.error); }); }
+let persisted = null, askedAgain = false;
+function persistNote(){
+  return persisted===true ? 'เครื่องยืนยันเก็บข้อมูลถาวรแล้ว' : persisted===false ? 'เครื่องยังไม่ยืนยันการเก็บถาวร ให้ติดตั้งลงหน้าจอโฮมแล้วเปิดจากไอคอน' : '';
+}
+async function askPersist(){
+  try{
+    if (!navigator.storage || !navigator.storage.persist) return;
+    persisted = (await navigator.storage.persisted()) || (await navigator.storage.persist());
+  }catch(e){ persisted = null; }
+  renderSide();
+}
 function backupDue(){
-  if (!state.tasks.length || Date.now() < Number(lsGet('wp-snooze') || 0)) return false;
-  const last = Number(lsGet('wp-lastbackup') || 0), first = Number(lsGet('wp-first') || Date.now());
-  return last ? Date.now() - last > 14*DAY : Date.now() - first > 3*DAY;
+  return false;
 }
 function backupNote(){
   const last = Number(lsGet('wp-lastbackup') || 0);
@@ -500,7 +509,7 @@ async function initStore(){
   if (restored){ const el = $('#sync'); el.textContent = 'กู้ข้อมูลคืนจากสำเนาสำรองในเครื่องแล้ว'; }
   try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){}
 }
-const commit = () => { render(); scheduleSave(); };
+const commit = () => { render(); scheduleSave(); if (persisted===false && !askedAgain){ askedAgain = true; askPersist(); } };
 
 /* ---------- formatting ---------- */
 function shortDate(s){ return parse(s).toLocaleDateString('th-TH', {day:'numeric', month:'short'}); }
@@ -669,7 +678,7 @@ function renderSide(){
   h += `<section><div class="side-h"><h2>ผู้เกี่ยวข้อง</h2></div>` + (people.length ? `<ul class="list-reset">` + people.map(([n,c]) =>
     `<li><button class="pe-btn" data-action="f-person" data-id="${esc(n)}" aria-pressed="${ui.person===n}"><span class="av" style="--h:${hueOf(n)};margin:0">${esc(initial(n))}</span><span class="nm">${esc(n)}</span><span class="n">${c}</span></button></li>`).join('') + `</ul>`
     : `<p class="muted-note">ยังไม่มี เพิ่มชื่อได้ในรายละเอียดของแต่ละงาน</p>`) + `</section>`;
-  h += `<section><div class="side-h"><h2>ข้อมูล</h2></div><div class="data-row"><button class="btn sm" data-action="backup">สำรองข้อมูล</button><button class="btn sm" data-action="import-pick">นำเข้า</button></div><p class="bk-note">${esc(backupNote())}</p></section>`;
+  h += `<section><div class="side-h"><h2>ข้อมูล</h2></div><div class="data-row"><button class="btn sm" data-action="backup">สำรองข้อมูล</button><button class="btn sm" data-action="import-pick">นำเข้า</button></div><p class="bk-note">${esc(backupNote())}</p><p class="bk-note">${esc(persistNote())}</p></section>`;
   $('#side').innerHTML = h;
 }
 function renderQuick(){
